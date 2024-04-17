@@ -1,0 +1,262 @@
+---
+title: "Kabul_Afghanistan_lab3"
+author: "Jordan Ayala"
+Done by: "Ali Mounim Rajabi"
+date: "2024-04-17"
+output: html_document
+---
+
+**Example for Lab 3**
+
+Lab 3 Directions
+
+1.  Choose a country to explore
+    -   Afghanistan
+2.  Explore temperature data for the country and a large city within the country
+3.  Explore land cover
+    -   Load in the land cover tiff for your chosen country
+4.  Identify and select a large city within the country you select
+    -   Load the boundary of urban areas in your chosen county
+        -   Use rnaturalearth ne_states() to get the country with administrative boundaries
+    -   Load the provided city data set for the city in your country
+5.  Explore urban heat islands
+
+Load packages
+
+```{r}
+#install.packages(c("terra","geodata","rnaturalearth","ggplot2","tidyterra","devtools","sf"))
+#install.packages("tidyverse")
+library(terra)
+library(geodata)
+library(rnaturalearth)
+library(ggplot2)
+library(tidyterra)
+library(devtools)
+library(sf)
+library(tidyverse)
+```
+
+**Part 1 Temperature for Mexico and Districts of Mexico City**
+
+Create map of the average temperature across first-level administrative boundaries (e.g., Afghanistan)
+
+```{r}
+#Step 1: Create required vector layer
+map_afg <- rnaturalearth::ne_states("Afghanistan", returnclass = "sf") #read in administrative level 1 boundaries for the country (e.g, states of Mexico)
+
+v_afg<- vect(map_afg) #Adjust sf object of districts from the example above to be able to use crds() function for calculating centriods
+```
+
+
+```{r}
+#Step 2: Create required raster layer
+r_tmax_afg <- geodata::worldclim_country(country = "Afghanistan", var = "tmax",
+                                res = 10, path = tempdir())
+afg_temp_max <- mean(r_tmax_afg) #average max temp across China
+
+s_points <- crds(centroids(v_afg))
+```
+
+```{r}
+#Simple terra plot of layers created above
+plot(afg_temp_max)
+plot(v_afg, add = TRUE)
+points(s_points)
+
+# data frame with the coordinates
+s_points <- as.data.frame(s_points)
+valuesatpoints <- terra::extract(afg_temp_max, s_points)
+cbind(s_points, valuesatpoints)
+
+# Extracted raster cells within each polygon
+head(terra::extract(afg_temp_max, v_afg, na.rm = TRUE))
+
+# Average raster values by polygon
+v_afg$tmax <- terra::extract(afg_temp_max, v_afg, mean, na.rm = TRUE)$mean
+
+# Plot average raster values within polygons
+ggplot(data = v_afg) + geom_spatvector(aes(fill = tmax)) +
+  scale_fill_terrain_c(name = "Max. Temp.")
+```
+
+**Question** Which parts of the country have the highest average temperature?
+
+
+Geodata from UC Davis provides a substantial amount of vector and raster data for earth observation studies: <https://geodata.ucdavis.edu/geodata/>
+
+For example, we can compare the elevation across Afghanistan to the temperature layer above...
+
+```{r}
+#Geodata 
+elev_afg <- elevation_30s(country="Afghanistan", path=tempdir())
+plot(elev_afg)
+```
+
+Next, create a map of the average temperature across districts within a large city in your chosen country (city shapes provided)
+
+First, let's create a sf object that represents the city
+
+Resource: <https://rpubs.com/timothyfraser/osmdata>
+
+```{r}
+#install.packages("osmdata")
+library(osmdata)
+#available_features() #See what features are available in Open Street Map
+```
+
+We’re going to use the osmdata package to extract geospatial information about our city of interest. In this case, we’re looking at Kabul, Afghanistan (hafg).
+
+First, we need to extract a bounding box - the longitude-latitude coordinates for a box around our area of interest. OpenStreetMap (OSM) needs that box to zoom in on just the information relevant to us. We’ll use the getbb() function to get that data and save it in mybox.
+
+```{r}
+mybox <- getbb(place_name = "Kabul, Afghanistan")
+
+#This creates a small matrix, which we can view below.
+mybox
+```
+
+Next, we’re going to run a series of functions to get sub-units of our city
+
+-   Using the `opq(mybox)` function, we will tell OSM to run a query within the geographic area of `mybox`. - Using `add_osm_feature()`, we will ask it to track down data that refers to administrative boundaries (`key = 'admin_level'`), rather than, say, coffeeshops.
+
+-   Further, we’re going to ask it to just get boundaries at the 6th level (`value = '6'`). This is the level corresponding to districts within a municipality in Mexico. See the table on [this page](https://wiki.openstreetmap.org/wiki/Tag:boundary%3Dadministrative) for more information about admin levels in OSM.
+
+-   We can change this value to adjust whether we look at countries, regions, counties, cities, neighborhoods, blocks, etc. See [this page for more information](https://wiki.openstreetmap.org/wiki/Key:admin_level), and [this table](https://wiki.openstreetmap.org/wiki/Tag:boundary%3Dadministrative)!
+
+-   Lower (1\~2) means higher geographic levels (continents, countries), while higher means lower geographic levels (cities, neighborhoods)
+
+-   We will use `osmdata_sf()` to extract data from our query in the `sf` package’s preferred format.
+
+-   We will use `with(osm_multipolygons)` to extract the `osm_multipolygons` data.frame from the list output from `osmdata_sf()`.
+
+-   We will save this all in an object we called `adm6`. (You can name it anything.)
+
+```{r}
+adm6 <- opq(mybox) %>%
+  add_osm_feature(key = 'admin_level', 
+                  value = "5") %>%
+  osmdata_sf() %>%
+  with(osm_multipolygons)
+adm6 %>% head()
+```
+
+Finally, we can visualize this layer in `ggplot()`, using the helper function from the `sf` package called `geom_sf()`. This special function automatically interprets the `geometry` column in `sf` data.frames to locate each point/polygon in space on the map.
+
+```{r}
+ggplot() +
+  geom_sf(data = adm6, color = "black", size = 1, fill = NA)
+```
+
+[Step 1]{.underline}: Create required vector layer
+
+```{r}
+#Example from above 
+osm_hafg <- getbb(place_name = "Kabul, Afghanistan") 
+hafg_adm <- opq(osm_hafg) %>%
+  add_osm_feature(key = 'admin_level', 
+                  value = "5") %>%
+  osmdata_sf() %>%
+  with(osm_multipolygons)
+hafg_adm %>% head()
+plot(hafg_adm)
+
+ggplot() +
+  geom_sf(data = hafg_adm, color = "black", size = 1, fill = NA)
+```
+
+
+
+[Step 2]{.underline}: Create cropped and masked raster of temperature in the city
+
+```{r}
+spatial_extent_bjg <- terra::ext(hafg_adm) #Get extent for hafg
+tmp_hafg <- terra::crop(afg_temp_max, spatial_extent_bjg) #Crop the avg temp raster to hafg
+tmp_mask_hafg <- terra::mask(tmp_hafg, vect(hafg_adm)) #Create a masked raster of the city for mapping
+
+#View what you created
+plot(tmp_mask_hafg)
+
+v_hafg <- vect(hafg_adm) #Adjust sf object of spain districts from the example above to be able to use crds() function for calculating centriods below
+
+s_points <- crds(centroids(v_hafg))
+
+plot(tmp_mask_hafg)
+plot(v_hafg, add = TRUE)
+points(s_points)
+
+# data frame with the coordinates
+s_points <- as.data.frame(s_points)
+valuesatpoints <- terra::extract(tmp_mask_hafg, s_points)
+cbind(s_points, valuesatpoints)
+
+# Extracted raster cells within each polygon
+head(terra::extract(tmp_mask_hafg, v_hafg, na.rm = TRUE))
+
+# Average raster values by polygon
+v_hafg$tmax <- terra::extract(tmp_mask_hafg, v_hafg, mean, na.rm = TRUE)$mean
+
+#Average of temperature values in each of the district of Kabul.
+
+# Plot average raster values within polygons
+ggplot(data = v_hafg) + geom_spatvector(aes(fill = tmax)) +
+  scale_fill_terrain_c(name = "Avg Max Temp") +
+  theme_minimal()
+```
+
+Complete the steps above to map the average **max** temperature across the districts of your city
+
+
+**Part 2 Land cover for your country and a large city within the country**
+
+```{r}
+#Step 1 Load land cover data for your country
+
+#You do NOT need to do these next two steps, these scripts create and then save the built landcover to be more easily read in for your lab
+#r_built <- geodata::landcover(var = "built", path = tempdir()) #built landcover for the world
+#terra::writeRaster(r_built, "Data/global_built_stack.tif", filetype = "GTiff", overwrite = TRUE) 
+
+r_built <- terra::rast("~/Desktop/Sp24/DataAnalytics/week11/8015301/global_built_stack.tif")
+plot(r_built)
+
+#Step 2: Create cropped and masked raster 
+spatial_extent_hafg <- terra::ext(hafg_adm) #Get extent for hafg
+lc_hafg <- terra::crop(r_built, spatial_extent_hafg) #Crop the avg temp raster to hafg
+lc_mask_hafg <- terra::mask(lc_hafg, vect(hafg_adm)) #Create a masked raster of the city for mapping
+plot(lc_mask_hafg[[1]], col=grey(100:0/100)) #View what you created in grey scale, light = low, dark = high built land cover
+```
+
+Map of build environment in the city
+
+```{r}
+names(lc_mask_hafg) #to see the raster layers that can be placed in the fill call
+
+ggplot() +
+  geom_spatraster(data = lc_mask_hafg, aes(fill = built)) +
+  scale_fill_viridis_c(na.value = "transparent", name = "Built Environment (%)") +
+  theme_minimal()
+```
+
+**Part 3 Urban heat islands in the city**
+
+UHI data from <https://sedac.ciesin.columbia.edu/data/set/sdei-global-uhi-2013/data-download>
+
+```{r}
+uhi_asia <- terra::rast("~/Desktop/Sp24/DataAnalytics/week11/8015301/sdei-global-summer-lst-2013-day-max-asia.tif")
+plot(uhi_asia)
+
+spatial_extent_hafg <- terra::ext(hafg_adm) #Get extent for hafg
+uhi_hafg <- terra::crop(uhi_asia, spatial_extent_hafg) #Crop the avg temp raster to hafg
+uhi_mask_hafg <- terra::mask(uhi_hafg, vect(hafg_adm)) #Create a masked raster of the city for mapping
+plot(uhi_mask_hafg)
+
+summary(uhi_mask_hafg)
+```
+
+Map of UHI
+
+```{r}
+ggplot() +
+  geom_spatraster(data = uhi_mask_hafg, aes(fill = `sdei-global-summer-lst-2013-day-max-asia`)) +
+  scale_fill_viridis_c(option = "turbo", na.value = "transparent", name = "Max Temp.") +
+  theme_minimal()
+```
